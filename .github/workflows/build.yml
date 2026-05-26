@@ -1,0 +1,242 @@
+name: Build Release Binaries
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build Windows executable
+        run: pyinstaller chesspair.spec
+
+      - name: Calculate checksums
+        run: |
+          certutil -hashfile dist/ChessPair.exe SHA256 > checksums.txt
+          dir dist/ChessPair.exe >> checksums.txt
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessPair-Windows
+          path: dist/ChessPair.exe
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-windows
+          path: checksums.txt
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pillow-icns
+
+      - name: Generate macOS icon if missing
+        run: |
+          if [ ! -f assets/icon.icns ]; then
+            python3 << 'PYSCRIPT'
+          import os
+          from PIL import Image
+
+          if os.path.exists('assets/icon-512.png'):
+              img = Image.open('assets/icon-512.png')
+              img.save('assets/icon.icns')
+              print("Converted icon-512.png to icon.icns")
+          PYSCRIPT
+          fi
+
+      - name: Build macOS app bundle
+        run: pyinstaller chesspair.spec
+
+      - name: Create DMG
+        run: |
+          hdiutil create -volname "ChessPair" \
+            -srcfolder dist/ChessPair.app \
+            -ov -format UDZO \
+            -imagekey zlib-level=9 \
+            ChessPair.dmg
+
+      - name: Calculate checksums
+        run: |
+          shasum -a 256 ChessPair.dmg > checksums.txt
+          ls -lh ChessPair.dmg >> checksums.txt
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChessPair-macOS
+          path: ChessPair.dmg
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: checksums-macos
+          path: checksums.txt
+
+  create-release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download Windows artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ChessPair-Windows
+
+      - name: Download macOS artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ChessPair-macOS
+
+      - name: Download Windows checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: checksums-windows
+          path: checksums-win
+
+      - name: Download macOS checksums
+        uses: actions/download-artifact@v4
+        with:
+          name: checksums-macos
+          path: checksums-mac
+
+      - name: Extract version from tag
+        id: tag
+        run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create Release Notes
+        run: |
+          cat > release_notes.md << 'EOF'
+          ## ChessPair ${{ steps.tag.outputs.version }}
+
+          ### 📦 Downloads
+          - **Windows**: `ChessPair.exe` — Unsigned, free to download and run
+          - **macOS**: `ChessPair.dmg` — Unsigned, bypass Gatekeeper with right-click → Open
+          - **Source**: Available on GitHub
+
+          ### 🔐 Verification
+          Verify file integrity using SHA-256:
+
+          **Windows:**
+          ```
+          certutil -hashfile ChessPair.exe SHA256
+          ```
+
+          **macOS/Linux:**
+          ```
+          shasum -a 256 ChessPair.dmg
+          ```
+
+          ### 📋 What's Inside
+          - Full Swiss pairing engine with backtracking
+          - All USCF tiebreaks (Modified Median, Solkoff, etc.)
+          - Multi-section support (Open, U1800, U1600, Scholastic, etc.)
+          - CSV export for players, pairings, and standings
+          - Fully offline — no account or internet required
+          - MIT Licensed — open source and free forever
+
+          ### ℹ️ Installation
+
+          **Windows:**
+          1. Download `ChessPair.exe`
+          2. Run it (may see SmartScreen warning — click "More info" → "Run anyway")
+          3. Start using immediately — no installation needed
+
+          **macOS:**
+          1. Download `ChessPair.dmg`
+          2. Open DMG file, drag `ChessPair` to Applications folder
+          3. On first run, right-click → Open (to bypass Gatekeeper)
+          4. After first launch, you can open normally
+
+          **Linux:**
+          Clone the repo and run from source:
+          ```bash
+          git clone https://github.com/Aweswomedude1234/chess-pairing.git
+          cd chess-pairing
+          python3 -m venv venv && source venv/bin/activate
+          pip install -r requirements.txt
+          python3 main.py
+          ```
+
+          ### 🔗 Resources
+          - [Full Documentation](https://github.com/Aweswomedude1234/chess-pairing)
+          - [Report Issues](https://github.com/Aweswomedude1234/chess-pairing/issues)
+          - [View Source](https://github.com/Aweswomedude1234/chess-pairing)
+
+          Not affiliated with USCF. MIT Licensed.
+          EOF
+
+      - name: Create GitHub Release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ steps.tag.outputs.version }}
+          release_name: ChessPair ${{ steps.tag.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: false
+
+      - name: Upload Windows binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./ChessPair.exe
+          asset_name: ChessPair.exe
+          asset_content_type: application/vnd.microsoft.portable-executable
+
+      - name: Upload macOS binary to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./ChessPair.dmg
+          asset_name: ChessPair.dmg
+          asset_content_type: application/x-apple-diskimage
+
+      - name: Upload Windows checksums to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./checksums-win/checksums.txt
+          asset_name: ChessPair-Windows-SHA256.txt
+          asset_content_type: text/plain
+
+      - name: Upload macOS checksums to release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./checksums-mac/checksums.txt
+          asset_name: ChessPair-macOS-SHA256.txt
+          asset_content_type: text/plain

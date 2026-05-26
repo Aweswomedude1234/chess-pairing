@@ -3,9 +3,14 @@
 # Usage: pyinstaller chesspair.spec
 
 import sys
+import os
 from PyInstaller.building.build_main import Analysis, PYZ, EXE, BUNDLE, COLLECT
 
 block_cipher = None
+
+# Detect if icon files exist, use them if available
+icon_ico = 'assets/icon.ico' if os.path.exists('assets/icon.ico') else None
+icon_icns = 'assets/icon.icns' if os.path.exists('assets/icon.icns') else None
 
 a = Analysis(
     ['main.py'],
@@ -41,12 +46,12 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,          # No terminal window on Windows
+    console=False,
     disable_windowed_traceback=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='assets/icon.ico',  # Uncomment and add icon file
+    icon=icon_ico,
 )
 
 # ── macOS .app Bundle ────────────────────────────────────────────────────────
@@ -54,10 +59,11 @@ if sys.platform == 'darwin':
     app = BUNDLE(
         exe,
         name='ChessPair.app',
-        # icon='assets/icon.icns',   # Uncomment and add icon file
+        icon=icon_icns,
         bundle_identifier='com.chesspair.app',
         info_plist={
             'NSHighResolutionCapable': True,
             'CFBundleShortVersionString': '1.0.0',
+            'CFBundleVersion': '1.0.0',
         },
     )
