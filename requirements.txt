@@ -1,0 +1,5 @@
+# ChessPair requirements
+# tkinter is part of the Python standard library — no pip install needed
+# pyinstaller is only needed to build distributable binaries
+
+pyinstaller>=6.0
